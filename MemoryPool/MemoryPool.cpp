@@ -8,7 +8,7 @@ MemoryPool::MemoryPool(size_t blockSize, size_t poolSize)
 }
 
 MemoryPool::~MemoryPool() {
-    // No dynamic memory to release, pool is managed by vector
+    checkForLeaks(); // 析构时检查内存泄漏
 }
 
 void MemoryPool::initializePool() {
@@ -21,14 +21,32 @@ void MemoryPool::initializePool() {
 void* MemoryPool::allocate() {
     std::lock_guard<std::mutex> lock(poolMutex);
     if (freeBlocks.empty()) {
-        throw std::bad_alloc(); // No available blocks
+        throw std::bad_alloc(); // 无可用块
     }
     void* block = freeBlocks.back();
     freeBlocks.pop_back();
+    allocatedBlocks.insert(block); // 记录分配的块
     return block;
 }
 
 void MemoryPool::deallocate(void* ptr) {
     std::lock_guard<std::mutex> lock(poolMutex);
-    freeBlocks.push_back(ptr);
+    auto it = allocatedBlocks.find(ptr);
+    if (it != allocatedBlocks.end()) {
+        allocatedBlocks.erase(it); // 从已分配集合中移除
+        freeBlocks.push_back(ptr); // 将块返回到空闲列表
+    } else {
+        std::cerr << "Warning: Attempted to deallocate memory that was not allocated by this pool." << std::endl;
+    }
+}
+
+void MemoryPool::checkForLeaks() const {
+    if (!allocatedBlocks.empty()) {
+        std::cerr << "Memory leak detected! " << allocatedBlocks.size() << " block(s) not deallocated." << std::endl;
+        for (void* ptr : allocatedBlocks) {
+            std::cerr << "Leaked block at address: " << ptr << std::endl;
+        }
+    } else {
+        std::cout << "No memory leaks detected." << std::endl;
+    }
 }
